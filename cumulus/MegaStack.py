@@ -3,8 +3,11 @@ import logging
 import simplejson
 import time
 import yaml
+import pystache
+import os
 from CFStack import CFStack
 from boto import cloudformation
+
 
 class MegaStack:
     """
@@ -12,28 +15,31 @@ class MegaStack:
     """
     def __init__(self, yamlFile):
         self.logger = logging.getLogger(__name__)
-        
+
         #load the yaml file and turn it into a dict
         thefile = open(yamlFile, 'r')
-        self.stackDict = yaml.safe_load(thefile)
 
+        renderedFile = pystache.render(thefile.read(), dict(os.environ))
+
+        self.stackDict = yaml.safe_load(renderedFile)
         #Make sure there is only one top level element in the yaml file
         if len(self.stackDict.keys()) != 1:
             self.logger.critical("Need one and only one mega stack name at the top level, found %s" % len(self.stackDict.keys()))
             exit(1)
-        
+
         #How we know we only have one top element, that must be the mega stack name
         self.name = self.stackDict.keys()[0]
 
         #Find and set the mega stacks region. Exit if we can't find it
-        if self.stackDict[self.name].has_key('region'):
+        if 'region' in self.stackDict[self.name]:
             self.region = self.stackDict[self.name]['region']
         else:
             self.logger.critical("No region specified for mega stack, don't know where to build it.")
             exit(1)
 
         self.sns_topic_arn = self.stackDict[self.name].get('sns-topic-arn', [])
-        if isinstance(self.sns_topic_arn, str): self.sns_topic_arn = [self.sns_topic_arn]
+        if isinstance(self.sns_topic_arn, str):
+            self.sns_topic_arn = [self.sns_topic_arn]
         for topic in self.sns_topic_arn:
             if topic.split(':')[3] != self.region:
                 self.logger.critical("SNS Topic %s is not in the %s region." % (topic, self.region))
@@ -45,14 +51,14 @@ class MegaStack:
 
         #Get the names of the sub stacks from the yaml file and sort in array
         self.cf_stacks = self.stackDict[self.name]['stacks'].keys()
-        
+
         #Megastack holds the connection to cloudformation and list of stacks currently in our region
         #Stops us making lots of calls to cloudformation API for each stack
         try:
             self.cfconn = cloudformation.connect_to_region(self.region)
             self.cf_desc_stacks = self.cfconn.describe_stacks()
         except boto.exception.NoAuthHandlerFound as e:
-            self.logger.critical("No credentials found for connecting to cloudformation: %s" % e )
+            self.logger.critical("No credentials found for connecting to cloudformation: %s" % e)
             exit(1)
 
         #iterate through the stacks in the yaml file and create CFstack objects for them
@@ -63,7 +69,8 @@ class MegaStack:
                     self.logger.warning("Stack %s is disabled by configuration directive. Skipping" % stack_name)
                     continue
                 local_sns_arn = the_stack.get('sns-topic-arn', self.sns_topic_arn)
-                if isinstance(local_sns_arn, str): local_sns_arn = [local_sns_arn]
+                if isinstance(local_sns_arn, str):
+                    local_sns_arn = [local_sns_arn]
                 for topic in local_sns_arn:
                     if topic.split(':')[3] != self.region:
                         self.logger.critical("SNS Topic %s is not in the %s region." % (topic, self.region))
@@ -72,7 +79,7 @@ class MegaStack:
                 merged_tags = dict(self.global_tags.items() + local_tags.items())
                 # Add static cumulus-stack tag
                 merged_tags['cumulus-stack'] = self.name
-                if the_stack.has_key('cf_template'):
+                if 'cf_template' in the_stack:
                     self.stack_objs.append(
                         CFStack(
                             mega_stack_name=self.name,
@@ -118,8 +125,8 @@ class MegaStack:
         else:
             self.stack_objs = sorted_stacks
             return True
-    
-    def check(self, stack_name = None):
+
+    def check(self, stack_name=None):
         """
         Checks the status of the yaml file. Displays parameters for the stacks it can.
         """
@@ -128,13 +135,15 @@ class MegaStack:
                 continue
             self.logger.info("Starting check of stack %s" % stack.name)
             if not stack.populate_params(self.cf_desc_stacks):
-                self.logger.info("Could not determine correct parameters for Cloudformation stack %s\n" % stack.name + 
-                        "\tMost likely because stacks it depends on haven't been created yet.")
+                self.logger.info(
+                    "Could not determine correct parameters for Cloudformation stack %s\n" % stack.name +
+                    "\tMost likely because stacks it depends on haven't been created yet."
+                )
             else:
                 self.logger.info("Stack %s would be created with following parameter values: %s" % (stack.cf_stack_name, stack.get_params_tuples()))
                 self.logger.info("Stack %s already exists in CF: %s" % (stack.cf_stack_name, bool(stack.exists_in_cf(self.cf_desc_stacks))))
-    
-    def create(self, stack_name = None):
+
+    def create(self, stack_name=None):
         """
         Create all stacks in the yaml file. Any that already exist are skipped (no attempt to update)
         """
@@ -151,7 +160,7 @@ class MegaStack:
                 if not stack.populate_params(self.cf_desc_stacks):
                     self.logger.critical("Could not determine correct parameters for stack %s" % stack.name)
                     exit(1)
-                
+
                 stack.read_template()
                 self.logger.info("Creating: %s, %s" % (stack.cf_stack_name, stack.get_params_tuples()))
                 try:
@@ -171,12 +180,12 @@ class MegaStack:
                 if create_result != "CREATE_COMPLETE":
                     self.logger.critical("Stack didn't create correctly, status is now %s" % create_result)
                     exit(1)
-                
+
                 #CF told us stack completed ok. Log message to that effect and refresh the list of stack objects in CF
                 self.logger.info("Finished creating stack: %s" % stack.cf_stack_name)
                 self.cf_desc_stacks = self.cfconn.describe_stacks()
 
-    def delete(self, stack_name = None):
+    def delete(self, stack_name=None):
         """
         Delete all the stacks from cloudformation.
         Does this in reverse dependency order. Prompts for confirmation before deleting each stack
@@ -204,7 +213,7 @@ class MegaStack:
                 self.logger.info("Finished deleting stack: %s" % stack.cf_stack_name)
                 self.cf_desc_stacks = self.cfconn.describe_stacks()
 
-    def update(self, stack_name = None):
+    def update(self, stack_name=None):
         """
         Attempts to update each of the stacks if template or parameters are diffenet to whats currently in cloudformation
         If a stack doesn't already exist. Logs critical error and exits.
@@ -234,31 +243,38 @@ class MegaStack:
                     #Would like to get this working. Tried datadiff at the moment but can't stop it from printing whole template
                     #stack.print_template_diff(self.cf_desc_stacks)
                 self.logger.info("Starting update of stack %s with parameters: %s" % (stack.name, stack.get_params_tuples()))
-                self.cfconn.validate_template(template_body = stack.template_body)
+                self.cfconn.validate_template(template_body=stack.template_body)
+
                 try:
                     self.cfconn.update_stack(
-                            stack_name    = stack.cf_stack_name,
-                            template_body = stack.template_body,
-                            parameters    = stack.get_params_tuples(),
-                            capabilities  = ['CAPABILITY_IAM'],
-                            tags          = stack.tags
-                            )
+                        stack_name=stack.cf_stack_name,
+                        template_body=stack.template_body,
+                        parameters=stack.get_params_tuples(),
+                        capabilities=['CAPABILITY_IAM'],
+                        tags=stack.tags,
+                    )
                 except boto.exception.BotoServerError as e:
-                    e_message_dict = simplejson.loads(e.error_message)
-                    if str(e_message_dict["Error"]["Message"]) == "No updates are to be performed.":
-                        self.logger.error("Cloudformation has no updates to perform on %s, this might be because there is a parameter with NoEcho set" % stack.name)
-                        continue
-                    else:
-                        self.logger.debug("Got error message: %s" % e_message_dict["Error"]["Message"])
-                        raise e
+                    try:
+                        e_message_dict = simplejson.loads(e.error_message)
+                        if str(e_message_dict["Error"]["Message"]) == "No updates are to be performed.":
+                            self.logger.error("Cloudformation has no updates to perform on %s, this might be because there is a parameter with NoEcho set" % stack.name)
+                            continue
+                        else:
+                            self.logger.error("Got error message: %s" % e_message_dict["Error"]["Message"])
+                            raise e
+                    except simplejson.decoder.JSONDecodeError:
+                        self.logger.critical("Unknown error updating stack: %s", e)
+                        exit(1)
                 update_result = self.watch_events(stack.cf_stack_name, ["UPDATE_IN_PROGRESS", "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS"])
                 if update_result != "UPDATE_COMPLETE":
                     self.logger.critical("Stack didn't update correctly, status is now %s" % update_result)
                     exit(1)
-                
+
                 self.logger.info("Finished updating stack: %s" % stack.cf_stack_name)
 
-    
+            #avoid getting rate limited
+            time.sleep(2)
+
     def watch(self, stack_name):
         """
         Watch events for a given cloudformation stack. It will keep watching until its state changes
@@ -277,10 +293,9 @@ class MegaStack:
         if not the_cf_stack:
             self.logger.error("Stack %s doesn't exist in cloudformation, can't watch something that doesn't exist." % stack.name)
             return False
-        
+
         self.logger.info("Watching stack %s, while in state %s." % (the_stack.cf_stack_name, str(the_cf_stack.stack_status)))
         self.watch_events(the_stack.cf_stack_name, str(the_cf_stack.stack_status))
-
 
     def watch_events(self, stack_name, while_status):
         """
@@ -292,10 +307,48 @@ class MegaStack:
         except boto.exception.BotoServerError as e:
             if str(e.error_message) == "Stack:%s does not exist" % (stack_name):
                 return "STACK_GONE"
+
+        status_color_map = {
+            'CREATE_IN_PROGRESS': '\033[1;33m',
+            'CREATE_FAILED': '\033[1;31m',
+            'CREATE_COMPLETE': '\033[1;32m',
+            'ROLLBACK_IN_PROGRESS': '\033[1;33m',
+            'ROLLBACK_FAILED': '\033[1;31m',
+            'ROLLBACK_COMPLETE': '\033[1;30m',
+            'DELETE_IN_PROGRESS': '\033[1;33m',
+            'DELETE_FAILED': '\033[1;31m',
+            'DELETE_COMPLETE': '\033[1;30m',
+            'UPDATE_IN_PROGRESS': '\033[1;33m',
+            'UPDATE_COMPLETE_CLEANUP_IN_PROGRESS': '\033[1;33m',
+            'UPDATE_COMPLETE': '\033[1;32m',
+            'UPDATE_ROLLBACK_IN_PROGRESS': '\033[1;33m',
+            'UPDATE_ROLLBACK_FAILED': '\033[1;31m',
+            'UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS': '\033[1;33m',
+            'UPDATE_ROLLBACK_COMPLETE': '\033[1;32m',
+            'UPDATE_FAILED': '\033[1;31m',
+        }
         #print the last 5 events, so we get to see the start of the action we are performing
         self.logger.info("Last 5 events for this stack:")
-        for e in reversed(events[:5]):
-            self.logger.info("%s %s %s %s %s %s" % (e.timestamp.isoformat(), e.resource_status, e.resource_type, e.logical_resource_id, e.physical_resource_id, e.resource_status_reason))
+        for event in reversed(events[:5]):
+            if self.stackDict[self.name].get('highlight-output', True):
+                self.logger.info("%s %s%s\033[0m %s %s %s %s" % (
+                    event.timestamp.isoformat(),
+                    status_color_map.get(event.resource_status, ''),
+                    event.resource_status,
+                    event.resource_type,
+                    event.logical_resource_id,
+                    event.physical_resource_id,
+                    event.resource_status_reason,
+                ))
+            else:
+                self.logger.info("%s %s %s %s %s %s" % (
+                    event.timestamp.isoformat(),
+                    event.resource_status,
+                    event.resource_type,
+                    event.logical_resource_id,
+                    event.physical_resource_id,
+                    event.resource_status_reason,
+                ))
         status = str(cfstack_obj.stack_status)
         self.logger.info("New events:")
         while status in while_status:
@@ -310,12 +363,28 @@ class MegaStack:
                 events_to_log.insert(0, new_events[x])
                 x += 1
             for event in events_to_log:
-                self.logger.info("%s %s %s %s %s %s" % (event.timestamp.isoformat(), event.resource_status, event.resource_type, event.logical_resource_id, event.physical_resource_id, event.resource_status_reason))
+                if self.stackDict[self.name].get('highlight-output', True):
+                    self.logger.info("%s %s%s\033[0m %s %s %s %s" % (
+                        event.timestamp.isoformat(),
+                        status_color_map.get(event.resource_status, ''),
+                        event.resource_status,
+                        event.resource_type,
+                        event.logical_resource_id,
+                        event.physical_resource_id,
+                        event.resource_status_reason,
+                    ))
+                else:
+                    self.logger.info("%s %s %s %s %s %s" % (
+                        event.timestamp.isoformat(),
+                        event.resource_status,
+                        event.resource_type,
+                        event.logical_resource_id,
+                        event.physical_resource_id,
+                        event.resource_status_reason,
+                    ))
             if x > 0:
                 events = new_events[:]
             cfstack_obj.update()
             status = str(cfstack_obj.stack_status)
             time.sleep(5)
         return status
-
-

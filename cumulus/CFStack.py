@@ -4,15 +4,14 @@ import boto
 from boto import cloudformation
 from boto.exception import S3ResponseError
 
-
 class CFStack:
-    def __init__(self, mega_stack_name, name, params, template_name, region, sns_topic_arn, tags = {}, depends_on = None):
+    def __init__(self, mega_stack_name, name, params, template_name, region, sns_topic_arn, tags = None, depends_on = None):
         self.logger = logging.getLogger(__name__)
         if mega_stack_name == name:
             self.cf_stack_name = name
         else:
             self.cf_stack_name = "%s-%s" % (mega_stack_name, name)
-        self.mega_stack_name = mega_stack_name 
+        self.mega_stack_name = mega_stack_name
         self.name = name
         self.yaml_params = params
         self.params = {}
@@ -29,7 +28,12 @@ class CFStack:
                     self.depends_on.append("%s-%s" % (mega_stack_name, dep))
         self.region = region
         self.sns_topic_arn = sns_topic_arn
-        self.tags = tags
+        
+        #Safer than setting default value for tags = {}
+        if tags is None:
+            self.tags = {}
+        else:
+            self.tags = tags
 
         try:
             open(template_name, 'r')
@@ -42,7 +46,7 @@ class CFStack:
 
         self.cf_stacks = {}
         self.cf_stacks_resources = {}
-    
+
     def deps_met(self, current_cf_stacks):
         if self.depends_on is None:
             return True
@@ -56,7 +60,7 @@ class CFStack:
                 if not dep_met:
                     return False
             return True
-    
+
     def exists_in_cf(self, current_cf_stacks):
         for stack in current_cf_stacks:
             if str(stack.stack_name) == self.cf_stack_name:
@@ -69,7 +73,6 @@ class CFStack:
             self.params = {}
             return True
         if self.deps_met(current_cf_stacks):
-            cfconn = cloudformation.connect_to_region(self.region)
             for param in self.yaml_params.keys():
                 if type(self.yaml_params[param]) is dict:
                     #Static value set, so use it
@@ -123,7 +126,7 @@ class CFStack:
         """
         Get information on parameters, outputs and resources from a stack and cache it
         """
-        if not resources: 
+        if not resources:
             if not self.cf_stacks.has_key(stack):
                 #We don't have this stack in the cache already so we need to pull it from CF
                 cfconn = cloudformation.connect_to_region(self.region)
@@ -169,8 +172,6 @@ class CFStack:
         Get a variable from a existing cloudformation stack, var_type should be parameter, resource or output.
         If using resource, provide the logical ID and this will return the Physical ID
         """
-        cfconn = cloudformation.connect_to_region(self.region)
-
         the_stack = self.get_cf_stack(stack = source_stack)
         if var_type == 'parameter':
             for p in the_stack.parameters:
@@ -188,7 +189,7 @@ class CFStack:
             print "Error: invalid var_type passed to get_value_from_cf, needs to be parameter, resource or output. Not: %s" % (var_type)
             exit(1)
 
-            
+
 
     def get_params_tuples(self):
         tuple_list = []
@@ -202,12 +203,12 @@ class CFStack:
             template_file = open(self.template_name, 'r')
             template = simplejson.load(template_file)
         except Exception as e:
-            print "Cannot open template file for stack %s, error: %s" % (self.name, e)
+            print "Cannot parse %s template for stack %s. Error: %s" % (self.template_name, self.name, e)
             exit(1)
         self.template_body = simplejson.dumps(template)
         return True
 
-    
+
     def template_uptodate(self, current_cf_stacks):
         """
         Check if stack is up to date with cloudformation.
@@ -236,7 +237,7 @@ class CFStack:
             return False
 
         for param in cf_stack.parameters:
-            #check if param in CF exists in our new parameter set, 
+            #check if param in CF exists in our new parameter set,
             #if not they are differenet and need updating
             if not self.params.has_key(str(param.key)):
                 self.logger.debug("New params are missing key %s that exists in CF for %s stack already." % (str(param.key), self.name))
@@ -245,13 +246,8 @@ class CFStack:
             if self.params[str(param.key)] != str(param.value):
                 self.logger.debug("Param %s for stack %s has changed from %s to %s" % (str(param.key), self.name, str(param.value), self.params[str(param.key)]))
                 return False
-        
+
         #We got to the end without returning False, so must be fine.
         return True
 
-    def print_template_diff(self, current_cf_stacks):
-        cf_stack = self.exists_in_cf(current_cf_stacks)
-        cf_template_dict = simplejson.loads(cf_stack.get_template()['GetTemplateResponse']['GetTemplateResult']['TemplateBody'])
 
-        self.logger.info(datadiff.diff(cf_template_dict, simplejson.loads(self.template_body), context=0))
-        

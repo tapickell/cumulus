@@ -3,9 +3,27 @@ Cumulus
 
 Helps manage AWS CloudFormation stacks
 
-
 News
 ----------------------------------
+### 2014-07-01
++ Added colour cloudformation event status output via 'highlight-output' setting in YAML.
+
+   ```
+   highlight-output: true
+   ``` 
+
+### 2014-04-17
++ You can now insert PyStache {{}} style variables to import environment variables.
+   ```
+   stack:
+      ami_id: {{AMIID}}
+   ```
+   ```
+   AMID=ami-1q23123123 cumulus -y example_stack.yaml -a create
+   ```
+
+   would be seen by cloudformation with the ami id of ami-1q23123123
+
 ### 2013-09-06
 + You can now define stack level tags using the _tags_ directive in the YaML file, like:
 
@@ -15,7 +33,7 @@ News
       tag2: value
    ```
    tags can be specified both at root level and sub-stack level. tags at root level are applied to all sub-stacks and duplicate sub-stack tags will override root level tags
-+ You can use the directive `disabled: true` in any sub-stack to prevent it from being created/updated/deleted
++ You can use the directive `disable: true` in any sub-stack to prevent it from being created/updated/deleted
 
 The problem
 ----------------------------------

@@ -1,6 +1,8 @@
 import logging
 import simplejson
+import boto
 from boto import cloudformation
+from boto.exception import S3ResponseError
 
 
 class CFStack:
@@ -73,6 +75,8 @@ class CFStack:
                     #Static value set, so use it
                     if self.yaml_params[param].has_key('value'):
                         self.params[param] = str(self.yaml_params[param]['value'])
+                    elif self.yaml_params[param].has_key('s3uri'):
+                        self.params[param] = self.get_value_from_s3(uri=self.yaml_params[param]['s3uri'], param=param)
                     #No static value set, but if we have a source, type and variable can try getting from CF
                     elif self.yaml_params[param].has_key('source') and self.yaml_params[param].has_key('type') and self.yaml_params[param].has_key('variable'):
                         if self.yaml_params[param]['source'] == self.mega_stack_name:
@@ -94,6 +98,8 @@ class CFStack:
                             #Static value set, so use it
                             if item.has_key('value'):
                                 param_list.append(str(item['value']))
+                            elif self.yaml_params[param].has_key('s3uri'):
+                              self.params[param] = self.get_value_from_s3(uri=self.yaml_params[param]['s3uri'], param=param)
                             #No static value set, but if we have a source, type and variable can try getting from CF
                             elif item.has_key('source') and item.has_key('type') and item.has_key('variable'):
                                 if item['source'] == self.mega_stack_name:
@@ -129,6 +135,34 @@ class CFStack:
                 the_stack = self.get_cf_stack(stack = stack, resources = False)
                 self.cf_stacks_resources[stack] = the_stack.list_resources()
             return self.cf_stacks_resources[stack]
+
+    def get_value_from_s3(self, uri, param):
+      import re
+      r = re.search(r"s3://(?P<bucket_name>[a-z0-9-.]+)(?P<object_path>.+)", uri)
+      if not r:
+        print "Error: invalid format for S3 lookup for parameter %s. Format is: s3://bucket-name/object/path" % param
+        exit(1)
+      
+      bucket_name = r.group('bucket_name')
+      object_path = r.group('object_path')
+
+      s3conn = boto.connect_s3()
+
+      try:
+        s3bucket = s3conn.get_bucket(bucket_name)
+      except S3ResponseError:
+        s3bucket = None
+
+      if not s3bucket:
+        print "Error: S3 bucket %s cannot be found or accessed" % bucket_name
+        exit(1)
+
+      s3key = s3bucket.get_key(object_path)
+      if not s3key:
+        print "Error: S3 object %s in bucket %s cannot be found or accessed" % (object_path, bucket_name)
+        exit(1)
+
+      return s3key.get_contents_as_string()
 
     def get_value_from_cf(self, source_stack, var_type, var_name):
         """

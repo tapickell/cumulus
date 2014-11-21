@@ -42,6 +42,11 @@
       "Description": "VpcId of the VPC to launch this instance in",
       "Type": "String"
     },
+    "InstanceAMI": {
+      "Description": "AMI image ID",
+      "Type": "String",
+      "Default": ""
+    },
     "Subnet": {
       "Description": "Subnet within the VPC to launch the instance",
       "Type": "String"
@@ -113,15 +118,7 @@
     "WebServerInstance": {
       "Type": "AWS::EC2::Instance",
       "Properties": {
-        "ImageId": {
-          "Fn::FindInMap": [
-            "RegionMap",
-            {
-              "Ref": "AWS::Region"
-            },
-            "AMI"
-          ]
-        },
+        "ImageId": { "Ref" : "InstanceAMI" },
         "SecurityGroupIds": [
           {
             "Ref": "InstanceSecurityGroup"

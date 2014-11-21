@@ -36,6 +36,9 @@ example-stack:
                     value: t1.micro
                 KeyName:
                     value: example
+                # Values can be lookup up by reading the content of an S3 object
+                InstanceAMI:
+                    s3uri: s3://my-bucket/object/path
                 #This is where cumulus adds real value, dynamically get the value of the vpcId from example-stack
                 VPC:
                     #source: which CF stack to look for the value

@@ -5,12 +5,14 @@
 
 import argparse
 import logging
+import urllib2
 from MegaStack import MegaStack
 
 def main():
 
     conf_parser = argparse.ArgumentParser()
-    conf_parser.add_argument("-y", "--yamlfile", dest="yamlfile", required=True, help="The yaml file to read the VPC mega stack configuration from")
+    conf_parser.add_argument("-u", "--url", dest="url", required=False, help="The url for a yaml file to read the VPC mega stack configuration from")
+    conf_parser.add_argument("-y", "--yamlfile", dest="yamlfile", required=False, help="The yaml file to read the VPC mega stack configuration from")
     conf_parser.add_argument("-a", "--action", dest="action", required=True, help="The action to preform: create, check, update, delete or watch")
     conf_parser.add_argument("-l", "--log", dest="loglevel", required=False, default="info", help="Log Level for output messages, CRITICAL, ERROR, WARNING, INFO or DEBUG")
     conf_parser.add_argument("-L", "--botolog", dest="botologlevel", required=False, default="critical", help="Log Level for boto, CRITICAL, ERROR, WARNING, INFO or DEBUG")
@@ -23,12 +25,20 @@ def main():
         print "Invalid action provided, must be one of: '%s'" % ( ", ".join(valid_actions) )
         exit(1)
 
-    #Make sure we can read the yaml file provided
-    try:
-        open(args.yamlfile, 'r')
-    except IOError as e:
-        print "Cannot read yaml file %s: %s" % (args.yamlfile, e)
-        exit(1)
+    if args.url:
+        try:
+            open(urllib2.urlopen(args.url).read())
+        except IOError as e:
+            print "Cannot read yaml file %s: %s" % (args.yamlfile, e)
+            exit(1)
+    elif args.yamlfile:
+        try:
+            open(args.yamlfile, 'r')
+        except IOError as e:
+            print "Cannot read yaml file %s: %s" % (args.yamlfile, e)
+            exit(1)
+    else:
+        print "Need to specify either -u for url or -y for local yaml file"
 
     #Get and configure the log level
     numeric_level = getattr(logging, args.loglevel.upper(), None)

@@ -5,7 +5,7 @@
 
 import argparse
 import logging
-import urllib2
+import requests
 from MegaStack import MegaStack
 
 def main():
@@ -27,18 +27,24 @@ def main():
 
     if args.url:
         try:
-            open(urllib2.urlopen(args.url).read())
+            file = open('temp.yml', 'w')
+            file.write(urllib.urlopen(args.url).read())
+            file.close()
+            open('temp.yml', 'r')
+            yml_filename = 'temp.yml'
         except IOError as e:
-            print "Cannot read yaml file %s: %s" % (args.yamlfile, e)
+            print "Cannot retrieve yaml file from url %s: %s" % (args.url, e)
             exit(1)
     elif args.yamlfile:
         try:
             open(args.yamlfile, 'r')
+            yml_filename = args.yamlfile
         except IOError as e:
             print "Cannot read yaml file %s: %s" % (args.yamlfile, e)
             exit(1)
     else:
         print "Need to specify either -u for url or -y for local yaml file"
+        exit(1)
 
     #Get and configure the log level
     numeric_level = getattr(logging, args.loglevel.upper(), None)
@@ -56,7 +62,7 @@ def main():
     logging.getLogger('boto').setLevel(boto_numeric_level)
 
     #Create the mega_stack object and sort out dependencies
-    the_mega_stack = MegaStack(args.yamlfile)
+    the_mega_stack = MegaStack(yml_filename)
     the_mega_stack.sort_stacks_by_deps()
 
     #Print some info about what we found in the yaml and dependency order
